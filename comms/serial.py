@@ -4,7 +4,36 @@ import struct
 from collections import namedtuple
 from time import ticks_ms, ticks_diff
 
-Command = namedtuple("Command", ("value", "length"))
+UBYTE = "B"
+SBYTE = "b"
+USHORT = "H"
+SSHORT = "h"
+FLOAT = "f"
+
+def format_length(fmt):
+    length = 0
+    for char in fmt:
+        if char in 'cbB?':
+            length += 1  # char, signed/unsigned char, bool
+        elif char in 'hH':
+            length += 2  # short, unsigned short
+        elif char in 'iI':
+            length += 4  # int, unsigned int
+        elif char in 'lL':
+            length += 4 if struct.calcsize('l') == 4 else 8  # long, unsigned long
+        elif char == 'f':
+            length += 4  # float
+        elif char == 'd':
+            length += 8  # double
+        else:
+            raise ValueError(f"Unsupported format character: {char}")
+    return length
+
+Command = namedtuple("Command", ("value", "length", "format"))
+
+def make_command(value, fmt=""):
+    return Command(value, format_length(fmt), fmt)
+
 
 class USBSerialComms:
     START_BYTE = 13
@@ -89,8 +118,10 @@ class USBSerialComms:
                         self.__timeout_reached = False
 
                     if self.__rx_callback is not None:
-                        if self.__rx_command.length > 0:  # If you need to do something with the data
-                            self.__rx_callback(self.__rx_data)  # Call the referenced command
+                        buffer = struct.unpack(">" + self.__rx_command.format, bytearray(self.__rx_data))
+                        fmt_len = len(self.__rx_command.format)
+                        if fmt_len > 0:
+                            self.__rx_callback(buffer[0] if fmt_len == 1 else buffer)  # Call the referenced command
                         else:
                             self.__rx_callback()
                     self.__last_received_ms = ticks_ms()
