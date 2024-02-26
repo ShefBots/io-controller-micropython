@@ -43,6 +43,9 @@ COM_IDENTIFY_SEND = make_command('I')
 COM_READ_TOF_SEND = make_command('T')
 COM_SET_LED_SEND = make_command('L', UBYTE * 4)
 
+COM_SET_GRIPPER = make_command('G', UBYTE)
+COM_READ_GRIPPER = make_command('g')
+
 
 def checksum(buffer):
     checksum = 0
@@ -100,9 +103,19 @@ if __name__ == "__main__":
         g = 0
         while True:
             #data_to_send = create_data(COM_READ_TOF_SEND)
-            data_to_send = create_data(COM_SET_LED_SEND, 0, 255, g, 255)
-            g = (g + 1) & 0xff
-            send_and_receive_bytes(ser, bytes(data_to_send), RECEIVE_TIMEOUT)
+            data_to_send = create_data(COM_SET_GRIPPER, 0)
+            send_and_receive_bytes(ser, bytes(data_to_send), 0.1)
+            
+            data_to_send = create_data(COM_READ_GRIPPER)
+            for i in range(10):
+                send_and_receive_bytes(ser, bytes(data_to_send), 0.2)
+
+            data_to_send = create_data(COM_SET_GRIPPER, 1)
+            send_and_receive_bytes(ser, bytes(data_to_send), 0.1)
+            
+            data_to_send = create_data(COM_READ_GRIPPER)
+            for i in range(10):
+                send_and_receive_bytes(ser, bytes(data_to_send), 0.2)
 
     except serial.SerialException as e:
         print(f"Error: {e}")
