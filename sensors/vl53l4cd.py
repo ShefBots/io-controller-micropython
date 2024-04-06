@@ -403,8 +403,20 @@ class VL53L4CD:
         self._write_register(
             _VL53L4CD_I2C_SLAVE_DEVICE_ADDRESS, struct.pack(">B", new_address)
         )
-        self.i2c_device = i2c_device.I2CDevice(self._i2c, new_address)
+        self._address = new_address
         
     def range_status(self):
         """Returns true if new data is ready, otherwise false."""
         return self._read_register(_VL53L4CD_RESULT_RANGE_STATUS)[0]
+    
+    def sigma(self):
+        """The distance in units of centimeters."""
+        sigma = self._read_register(_VL53L4CD_RESULT_SIGMA, 2)
+        sigma = struct.unpack(">H", sigma)[0]
+        return sigma / 4
+    
+    def signal_rate(self):
+        """The distance in units of centimeters."""
+        rate = self._read_register(_VL53L4CD_RESULT_SIGNAL_RATE, 2)
+        rate = struct.unpack(">H", rate)[0]
+        return rate * 8
