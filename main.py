@@ -106,6 +106,7 @@ GRIPPER_CLOSED_VALUE = -50
 gripper_state = GRIPPER_UNKNOWN
 
 def set_gripper(state):
+    global gripper_state
     if state == GRIPPER_OPEN:
         end_value = GRIPPER_OPEN_VALUE
         target_state = GRIPPER_OPEN
