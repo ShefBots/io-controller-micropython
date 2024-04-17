@@ -1,6 +1,6 @@
 import time
 import micropython
-from inventor import Inventor2040W
+from inventor import Inventor2040W, A1
 from comms.serial import make_command, USBSerialComms, UBYTE, USHORT
 from sensors.vl53l4cd import VL53L4CD
 from machine import Timer, Pin
@@ -46,6 +46,9 @@ COM_SET_GRIPPER_RECV = make_command('G', UBYTE)     # No Set Gripper ACK
 COM_READ_GRIPPER_RECV = make_command('g')
 COM_READ_GRIPPER_ACK = make_command('g', UBYTE)
 
+COM_READ_BARREL_RECV = make_command('B')
+COM_READ_BARREL_ACK = make_command('B', UBYTE)
+
 
 # Initialise the Inventor 2040 and systems
 board = Inventor2040W(init_encoders=False, init_leds=False)
@@ -71,8 +74,10 @@ xshut_pins = [Pin(0, Pin.OUT),
               Pin(26, Pin.OUT)]
 
 gripper_state = GRIPPER_UNKNOWN
+gripper_timer = Timer(-1)
 
-servo_timer = Timer(-1)
+barrel_sensor = Pin(A1, Pin.IN, Pin.PULL_UP)
+
 
 # Shut all the ToF sensors down
 for xshut in xshut_pins:
@@ -140,23 +145,25 @@ def set_led(data):
         leds.set_rgb(led, r, g, b)
 
 def set_gripper(state):
-    global servo_timer
+    global gripper_timer
     global gripper_state
     if state == GRIPPER_OPEN:
         end_value = GRIPPER_OPEN_ANGLE
         target_state = GRIPPER_OPEN
         gripper_state = GRIPPER_OPENING
+
     elif state == GRIPPER_CLOSED:
         end_value = GRIPPER_CLOSED_ANGLE
         target_state = GRIPPER_CLOSED
         gripper_state = GRIPPER_CLOSING
+
     else:
         gripper_servo_l.disable()
         gripper_servo_r.disable()
         gripper_state = GRIPPER_UNKNOWN
         return
     
-    servo_timer.deinit()
+    gripper_timer.deinit()
 
     gripper_servo_l.enable()
     gripper_servo_r.enable()
@@ -173,18 +180,23 @@ def set_gripper(state):
             timer.deinit()  # Stop the timer when duration is reached
             gripper_servo_l.disable()
             gripper_servo_r.disable()
+
         elif time_elapsed >= GRIPPER_DURATION_MS:
             gripper_servo_l.value(end_value)
             gripper_servo_r.value(end_value)
             gripper_state = target_state
+
         else:
             gripper_servo_l.to_percent(time_elapsed, 0, GRIPPER_DURATION_MS, start_value_l, end_value)
             gripper_servo_r.to_percent(time_elapsed, 0, GRIPPER_DURATION_MS, start_value_r, end_value)
 
-    servo_timer.init(period=GRIPPER_TIMESTEP, mode=Timer.PERIODIC, callback=update)
+    gripper_timer.init(period=GRIPPER_TIMESTEP, mode=Timer.PERIODIC, callback=update)
 
 def read_gripper_ack():
     comms.send(COM_READ_GRIPPER_ACK, "B", gripper_state)
+
+def read_barrel_ack():
+    comms.send(COM_READ_BARREL_ACK, "B", not barrel_sensor.value())
 
 
 # Command setup
@@ -197,17 +209,11 @@ comms.assign(COM_READ_TOF_RECV, read_tof_ack)
 comms.assign(COM_SET_LED_RECV, set_led)
 comms.assign(COM_SET_GRIPPER_RECV, set_gripper)
 comms.assign(COM_READ_GRIPPER_RECV, read_gripper_ack)
+comms.assign(COM_READ_BARREL_RECV, read_barrel_ack)
 
 # Credit to DrFootleg
 time.sleep(5)               # Sleep to allow time to stop the program on power up to get to repl
 micropython.kbd_intr(-1)    # Disable reacting to escape characters
-
-# Show the board is now functioning
-comms_disconnected()
-
-# TEMP
-#for vl53 in tof_sensors:
-#    vl53.start_ranging()
 
 # Animate the gripper to verify it's working
 set_gripper(GRIPPER_CLOSED)
@@ -217,6 +223,12 @@ time.sleep_ms(GRIPPER_DURATION_MS)
 set_gripper(GRIPPER_CLOSED)
 time.sleep_ms(GRIPPER_DURATION_MS)
 
+# Show the board is now functioning
+comms_disconnected()
+
+# TEMP
+#for vl53 in tof_sensors:
+#    vl53.start_ranging()
 
 # Variables for the main loop
 tof_read_fails = [0] * len(tof_sensors)

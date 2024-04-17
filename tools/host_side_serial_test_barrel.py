@@ -46,6 +46,7 @@ COM_SET_LED_SEND = make_command('L', UBYTE * 4)
 COM_SET_GRIPPER = make_command('G', UBYTE)
 COM_READ_GRIPPER = make_command('g')
 
+COM_READ_BARREL = make_command('B')
 
 def checksum(buffer):
     checksum = 0
@@ -100,22 +101,9 @@ if __name__ == "__main__":
         ser = serial.Serial(com_port, baudrate=9600, timeout=1)
 
         # Call the function to send and receive bytes
-        g = 0
         while True:
-            #data_to_send = create_data(COM_READ_TOF_SEND)
-            data_to_send = create_data(COM_SET_GRIPPER, 0)
+            data_to_send = create_data(COM_READ_BARREL)
             send_and_receive_bytes(ser, bytes(data_to_send), 0.1)
-            
-            data_to_send = create_data(COM_READ_GRIPPER)
-            for i in range(10):
-                send_and_receive_bytes(ser, bytes(data_to_send), 0.2)
-
-            data_to_send = create_data(COM_SET_GRIPPER, 1)
-            send_and_receive_bytes(ser, bytes(data_to_send), 0.1)
-            
-            data_to_send = create_data(COM_READ_GRIPPER)
-            for i in range(10):
-                send_and_receive_bytes(ser, bytes(data_to_send), 0.2)
 
     except serial.SerialException as e:
         print(f"Error: {e}")
