@@ -1,14 +1,18 @@
 import time
 import micropython
-from inventor import Inventor2040W, NUM_LEDS
+from inventor import Inventor2040W
 from comms.serial import make_command, USBSerialComms, UBYTE, USHORT
 from sensors.vl53l4cd import VL53L4CD
 from machine import Timer, Pin
+from plasma import WS2812
+from servo import Calibration
 
 BOARD_ID = 0x01
 RIGHT_TOF = 0
 FRONT_TOF = 1
 LEFT_TOF = 2
+BACK_TOF = 3
+NUM_LEDS = 7
 
 COM_IDENTIFY_RECV = make_command('I')
 COM_IDENTIFY_ACK = make_command('I', UBYTE)
@@ -24,10 +28,15 @@ COM_SET_GRIPPER_RECV = make_command('G', UBYTE)
 COM_READ_GRIPPER_RECV = make_command('g')
 COM_READ_GRIPPER_ACK = make_command('g', UBYTE)
 
-board = Inventor2040W(init_encoders=False)
+board = Inventor2040W(init_encoders=False, init_leds=False)
 comms = USBSerialComms()
+leds = WS2812(NUM_LEDS, 0, 2, board.SERVO_6_PIN)
+leds.start()
 
-xshut_pins = [Pin(0, Pin.OUT), Pin(1, Pin.OUT), Pin(2, Pin.OUT)]
+xshut_pins = [Pin(0, Pin.OUT),
+              Pin(1, Pin.OUT),
+              Pin(2, Pin.OUT),
+              Pin(26, Pin.OUT)]
 
 # Shut all the ToF sensors down
 for xshut in xshut_pins:
@@ -49,22 +58,30 @@ for i, xshut in enumerate(xshut_pins):
     
 if tof_sensors.count(None) > 0:
     for led in range(NUM_LEDS):
-        board.leds.set_rgb(led, 64, 0, 64)
+        leds.set_rgb(led, 64, 0, 64)
     while not board.switch_pressed():
         pass
 
 for i in range(NUM_LEDS):
-    board.leds.set_rgb(i, 64, 64, 64)
+    leds.set_rgb(i, 64, 64, 64)
 
 last_distance = [0] * len(tof_sensors)
 
 gripper_servo_l = board.servos[0]
 gripper_servo_r = board.servos[1]
 
+l_cal = Calibration()
+l_cal.apply_two_pairs(1500, 990, 0, 45)
+gripper_servo_l.calibration(l_cal)
+
+r_cal = Calibration()
+r_cal.apply_two_pairs(1550, 2060, 0, 45)
+gripper_servo_r.calibration(r_cal)
+
 def comms_connected():
     # Update all the LEDs
     for i in range(NUM_LEDS):
-        board.leds.set_rgb(i, 0, 64, 0)
+        leds.set_rgb(i, 0, 64, 0)
     for vl53 in tof_sensors:
         if vl53 is not None:
             vl53.start_ranging()
@@ -72,7 +89,7 @@ def comms_connected():
 def comms_disconnected():
     # Update all the LEDs
     for i in range(NUM_LEDS):
-        board.leds.set_rgb(i, 64, 0, 0)
+        leds.set_rgb(i, 0, 0, 64)
     for vl53 in tof_sensors:
         if vl53 is not None:
             vl53.stop_ranging()
@@ -89,7 +106,7 @@ def read_tof_ack(data):
 def set_led(data):
     led, r, g, b = data
     if led < NUM_LEDS:
-        board.leds.set_rgb(led, r, g, b)
+        leds.set_rgb(led, r, g, b)
 
 GRIPPER_CLOSED = 0
 GRIPPER_OPEN = 1
@@ -99,13 +116,17 @@ GRIPPER_OPENING = 4
 
 SERVO_TIMESTEP = 20
 SERVO_DURATION_MS = 1000
+SERVO_TIMEOUT_MS = SERVO_DURATION_MS + 500
 
 GRIPPER_OPEN_VALUE = 0
-GRIPPER_CLOSED_VALUE = -50
+GRIPPER_CLOSED_VALUE = 45
 
 gripper_state = GRIPPER_UNKNOWN
 
+servo_timer = Timer(-1)
+
 def set_gripper(state):
+    global servo_timer
     global gripper_state
     if state == GRIPPER_OPEN:
         end_value = GRIPPER_OPEN_VALUE
@@ -120,6 +141,8 @@ def set_gripper(state):
         gripper_servo_r.disable()
         gripper_state = GRIPPER_UNKNOWN
         return
+    
+    servo_timer.deinit()
 
     gripper_servo_l.enable()
     gripper_servo_r.enable()
@@ -132,17 +155,19 @@ def set_gripper(state):
         nonlocal time_elapsed
         global gripper_state
         time_elapsed += SERVO_TIMESTEP
-        if time_elapsed >= SERVO_DURATION_MS:
+        if time_elapsed >= SERVO_TIMEOUT_MS:
             timer.deinit()  # Stop the timer when duration is reached
+            gripper_servo_l.disable()
+            gripper_servo_r.disable()
+        elif time_elapsed >= SERVO_DURATION_MS:
             gripper_servo_l.value(end_value)
-            gripper_servo_r.value(-end_value)
+            gripper_servo_r.value(end_value)
             gripper_state = target_state
         else:
             gripper_servo_l.to_percent(time_elapsed, 0, SERVO_DURATION_MS, start_value_l, end_value)
-            gripper_servo_r.to_percent(time_elapsed, 0, SERVO_DURATION_MS, start_value_r, -end_value)
+            gripper_servo_r.to_percent(time_elapsed, 0, SERVO_DURATION_MS, start_value_r, end_value)
 
-    timer = Timer(-1)
-    timer.init(period=SERVO_TIMESTEP, mode=Timer.PERIODIC, callback=update)
+    servo_timer.init(period=SERVO_TIMESTEP, mode=Timer.PERIODIC, callback=update)
 
 def read_gripper_ack():
     comms.send(COM_READ_GRIPPER_ACK, "B", gripper_state)
@@ -207,7 +232,7 @@ while not board.switch_pressed():
 
 
 for i in range(NUM_LEDS):
-    board.leds.set_rgb(i, 0, 0, 0)
+    leds.set_rgb(i, 0, 0, 0)
 
 gripper_servo_l.disable()
 gripper_servo_r.disable()
