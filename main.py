@@ -7,43 +7,78 @@ from machine import Timer, Pin
 from plasma import WS2812
 from servo import Calibration
 
-BOARD_ID = 0x01
+# Constants
+BOARD_ID = 0x01     # The ID this board will report back on USB serial
+NUM_LEDS = 7        # The number of addressable LEDs that are controllable
+
+# The time of flight sensor indices
 RIGHT_TOF = 0
 FRONT_TOF = 1
 LEFT_TOF = 2
 BACK_TOF = 3
-NUM_LEDS = 7
 
+# Gripper states
+GRIPPER_CLOSED = 0
+GRIPPER_OPEN = 1
+GRIPPER_UNKNOWN = 2
+GRIPPER_CLOSING = 3
+GRIPPER_OPENING = 4
+
+# Gripper constants
+GRIPPER_TIMESTEP = 20        # The time between each servo update
+GRIPPER_DURATION_MS = 1000   # The duration of a gripper open/close
+GRIPPER_TIMEOUT_MS = 500     # How long to wait after a gripper move before turning the servos off
+GRIPPER_OPEN_ANGLE = 0       # The servo angle for open
+GRIPPER_CLOSED_ANGLE = 45    # The servo angle for closed
+
+# USB Serial command definitions
 COM_IDENTIFY_RECV = make_command('I')
 COM_IDENTIFY_ACK = make_command('I', UBYTE)
 
-COM_POKE_RECV = make_command('P')
+COM_POKE_RECV = make_command('P')   # No Poke ACK
 
 COM_READ_TOF_RECV = make_command('T', UBYTE)
 COM_READ_TOF_ACK = make_command('T', USHORT)
 
-COM_SET_LED_RECV = make_command('L', UBYTE * 4)
+COM_SET_LED_RECV = make_command('L', UBYTE * 4)     # No Set LED ACK
 
-COM_SET_GRIPPER_RECV = make_command('G', UBYTE)
+COM_SET_GRIPPER_RECV = make_command('G', UBYTE)     # No Set Gripper ACK
 COM_READ_GRIPPER_RECV = make_command('g')
 COM_READ_GRIPPER_ACK = make_command('g', UBYTE)
 
+
+# Initialise the Inventor 2040 and systems
 board = Inventor2040W(init_encoders=False, init_leds=False)
 comms = USBSerialComms()
 leds = WS2812(NUM_LEDS, 0, 2, board.SERVO_6_PIN)
 leds.start()
+gripper_servo_l = board.servos[0]
+gripper_servo_r = board.servos[1]
+tof_sensors = []
 
+# Calibrate the gripper servos
+l_cal = Calibration()
+r_cal = Calibration()
+l_cal.apply_two_pairs(1500, 990, 0, 45)
+r_cal.apply_two_pairs(1550, 2060, 0, 45)
+gripper_servo_l.calibration(l_cal)
+gripper_servo_r.calibration(r_cal)
+
+# Set up the ToF shutdown pins
 xshut_pins = [Pin(0, Pin.OUT),
               Pin(1, Pin.OUT),
               Pin(2, Pin.OUT),
               Pin(26, Pin.OUT)]
 
+gripper_state = GRIPPER_UNKNOWN
+
+servo_timer = Timer(-1)
+
 # Shut all the ToF sensors down
 for xshut in xshut_pins:
     xshut.low()
 
-tof_sensors = []
-
+# Initialise each ToF with a unique address based on its shutdown pin
 for i, xshut in enumerate(xshut_pins):
     xshut.high()
     try:
@@ -55,29 +90,24 @@ for i, xshut in enumerate(xshut_pins):
     except OSError:
         vl53 = None
     tof_sensors.append(vl53)
-    
+
+# Raise a warning if some of the ToF sensors are missing
 if tof_sensors.count(None) > 0:
     for led in range(NUM_LEDS):
         leds.set_rgb(led, 64, 0, 64)
     while not board.switch_pressed():
         pass
 
+# List storing the distances from the ToFs
+last_distance = [0] * len(tof_sensors)
+
+
+# Show the board has passed initialisation
 for i in range(NUM_LEDS):
     leds.set_rgb(i, 64, 64, 64)
 
-last_distance = [0] * len(tof_sensors)
 
-gripper_servo_l = board.servos[0]
-gripper_servo_r = board.servos[1]
-
-l_cal = Calibration()
-l_cal.apply_two_pairs(1500, 990, 0, 45)
-gripper_servo_l.calibration(l_cal)
-
-r_cal = Calibration()
-r_cal.apply_two_pairs(1550, 2060, 0, 45)
-gripper_servo_r.calibration(r_cal)
-
+# Comms callback functions
 def comms_connected():
     # Update all the LEDs
     for i in range(NUM_LEDS):
@@ -96,6 +126,7 @@ def comms_disconnected():
     gripper_servo_l.disable()
     gripper_servo_r.disable()
 
+# Command callback functions
 def identify_ack():
     comms.send(COM_IDENTIFY_ACK, "B", BOARD_ID)
 
@@ -108,32 +139,15 @@ def set_led(data):
     if led < NUM_LEDS:
         leds.set_rgb(led, r, g, b)
 
-GRIPPER_CLOSED = 0
-GRIPPER_OPEN = 1
-GRIPPER_UNKNOWN = 2
-GRIPPER_CLOSING = 3
-GRIPPER_OPENING = 4
-
-SERVO_TIMESTEP = 20
-SERVO_DURATION_MS = 1000
-SERVO_TIMEOUT_MS = SERVO_DURATION_MS + 500
-
-GRIPPER_OPEN_VALUE = 0
-GRIPPER_CLOSED_VALUE = 45
-
-gripper_state = GRIPPER_UNKNOWN
-
-servo_timer = Timer(-1)
-
 def set_gripper(state):
     global servo_timer
     global gripper_state
     if state == GRIPPER_OPEN:
-        end_value = GRIPPER_OPEN_VALUE
+        end_value = GRIPPER_OPEN_ANGLE
         target_state = GRIPPER_OPEN
         gripper_state = GRIPPER_OPENING
     elif state == GRIPPER_CLOSED:
-        end_value = GRIPPER_CLOSED_VALUE
+        end_value = GRIPPER_CLOSED_ANGLE
         target_state = GRIPPER_CLOSED
         gripper_state = GRIPPER_CLOSING
     else:
@@ -154,25 +168,26 @@ def set_gripper(state):
     def update(timer):
         nonlocal time_elapsed
         global gripper_state
-        time_elapsed += SERVO_TIMESTEP
-        if time_elapsed >= SERVO_TIMEOUT_MS:
+        time_elapsed += GRIPPER_TIMESTEP
+        if time_elapsed >= GRIPPER_DURATION_MS + GRIPPER_TIMEOUT_MS:
             timer.deinit()  # Stop the timer when duration is reached
             gripper_servo_l.disable()
             gripper_servo_r.disable()
-        elif time_elapsed >= SERVO_DURATION_MS:
+        elif time_elapsed >= GRIPPER_DURATION_MS:
             gripper_servo_l.value(end_value)
             gripper_servo_r.value(end_value)
             gripper_state = target_state
         else:
-            gripper_servo_l.to_percent(time_elapsed, 0, SERVO_DURATION_MS, start_value_l, end_value)
-            gripper_servo_r.to_percent(time_elapsed, 0, SERVO_DURATION_MS, start_value_r, end_value)
+            gripper_servo_l.to_percent(time_elapsed, 0, GRIPPER_DURATION_MS, start_value_l, end_value)
+            gripper_servo_r.to_percent(time_elapsed, 0, GRIPPER_DURATION_MS, start_value_r, end_value)
 
-    servo_timer.init(period=SERVO_TIMESTEP, mode=Timer.PERIODIC, callback=update)
+    servo_timer.init(period=GRIPPER_TIMESTEP, mode=Timer.PERIODIC, callback=update)
 
 def read_gripper_ack():
     comms.send(COM_READ_GRIPPER_ACK, "B", gripper_state)
 
-# Setup
+
+# Command setup
 comms.set_comms_established_callback(comms_connected)
 comms.set_no_comms_timeout_callback(comms_disconnected)
 
@@ -184,25 +199,30 @@ comms.assign(COM_SET_GRIPPER_RECV, set_gripper)
 comms.assign(COM_READ_GRIPPER_RECV, read_gripper_ack)
 
 # Credit to DrFootleg
-time.sleep(5)  # Sleep to allow time to stop program on power up to get to repl
-micropython.kbd_intr(-1)
+time.sleep(5)               # Sleep to allow time to stop the program on power up to get to repl
+micropython.kbd_intr(-1)    # Disable reacting to escape characters
 
+# Show the board is now functioning
 comms_disconnected()
 
 # TEMP
 #for vl53 in tof_sensors:
 #    vl53.start_ranging()
-    
+
+# Animate the gripper to verify it's working
 set_gripper(GRIPPER_CLOSED)
-time.sleep(SERVO_DURATION_MS / 1000)
+time.sleep_ms(GRIPPER_DURATION_MS)
 set_gripper(GRIPPER_OPEN)
-time.sleep(SERVO_DURATION_MS / 1000)
+time.sleep_ms(GRIPPER_DURATION_MS)
 set_gripper(GRIPPER_CLOSED)
-time.sleep(SERVO_DURATION_MS / 1000)
+time.sleep_ms(GRIPPER_DURATION_MS)
 
 
+# Variables for the main loop
 tof_read_fails = [0] * len(tof_sensors)
 tof_read_invalid = [0] * len(tof_sensors)
+
+# The main program loop
 while not board.switch_pressed():
     comms.check_receive()
     for i, vl53 in enumerate(tof_sensors):
@@ -230,9 +250,10 @@ while not board.switch_pressed():
                     last_distance[i] = -99
                     #print("ToF Failed")
 
-
+# Turn off the LEDs to show the program has ended
 for i in range(NUM_LEDS):
     leds.set_rgb(i, 0, 0, 0)
 
+# Disable the gripper servos
 gripper_servo_l.disable()
 gripper_servo_r.disable()
