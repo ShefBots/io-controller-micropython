@@ -177,5 +177,5 @@ class USBSerialComms:
         # Calculate the checksum and update the last byte of the buffer
         buffer[-1] = self.checksum_from_full(buffer)
 
-        # Write out the buffer
-        sys.stdout.write(buffer)
+        # Write out the buffer, using method that doesn't touch carrage returns
+        sys.stdout.buffer.write(buffer)
