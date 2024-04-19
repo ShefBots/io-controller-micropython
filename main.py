@@ -315,6 +315,7 @@ def fire_turret():
         nonlocal time_elapsed
         nonlocal last_hall
         nonlocal turret_state
+        global turret_timer_running
         
         current_hall = turret_hall.value()
         
