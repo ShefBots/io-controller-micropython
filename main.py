@@ -10,6 +10,7 @@ from servo import Servo, Calibration
 # Constants
 BOARD_ID = 0x01     # The ID this board will report back on USB serial
 NUM_LEDS = 7        # The number of addressable LEDs that are controllable
+LED_BRIGHTNESS = 64 # The max brightness the LEDs will go to
 
 # The time of flight sensor indices
 RIGHT_TOF = 0
@@ -74,6 +75,12 @@ board = Inventor2040W(init_encoders=False, init_servos=False, init_leds=False)
 comms = USBSerialComms()
 leds = WS2812(NUM_LEDS, 0, 2, board.SERVO_6_PIN)
 leds.start()
+
+# Show the board has powered up
+for i in range(NUM_LEDS):
+    leds.set_rgb(i, LED_BRIGHTNESS, LED_BRIGHTNESS, 0)
+time.sleep(0.5)
+
 gripper_servo_l = Servo(Inventor2040W.SERVO_1_PIN)
 gripper_servo_r = Servo(Inventor2040W.SERVO_2_PIN)
 turret_tilt_servo = Servo(Inventor2040W.SERVO_3_PIN)
@@ -137,14 +144,20 @@ for i, xshut in enumerate(xshut_pins):
 
         #vl53.inter_measurement = 0
         vl53.timing_budget = 1000 // 10
-    except OSError:
+    except OSError as e:
         vl53 = None
     tof_sensors.append(vl53)
 
 # Raise a warning if some of the ToF sensors are missing
 if tof_sensors.count(None) > 0:
     for led in range(NUM_LEDS):
-        leds.set_rgb(led, 64, 0, 64)
+        if led < len(xshut_pins):
+            if tof_sensors[led] is None:
+                leds.set_rgb(NUM_LEDS - led - 1, LED_BRIGHTNESS, 0, LED_BRIGHTNESS)
+            else:
+                leds.set_rgb(NUM_LEDS - led - 1, 0, LED_BRIGHTNESS, 0)
+        else:
+            leds.set_rgb(NUM_LEDS - led - 1, 0, 0, 0)
     while not board.switch_pressed():
         pass
 
@@ -154,14 +167,14 @@ last_distance = [0] * len(tof_sensors)
 
 # Show the board has passed initialisation
 for i in range(NUM_LEDS):
-    leds.set_rgb(i, 64, 64, 64)
+    leds.set_rgb(i, LED_BRIGHTNESS, LED_BRIGHTNESS, LED_BRIGHTNESS)
 
 
 # Comms callback functions
 def comms_connected():
     # Update all the LEDs
     for i in range(NUM_LEDS):
-        leds.set_rgb(i, 0, 64, 0)
+        leds.set_rgb(i, 0, LED_BRIGHTNESS, 0)
     for vl53 in tof_sensors:
         if vl53 is not None:
             vl53.start_ranging()
@@ -169,7 +182,7 @@ def comms_connected():
 def comms_disconnected():
     # Update all the LEDs
     for i in range(NUM_LEDS):
-        leds.set_rgb(i, 0, 0, 64)
+        leds.set_rgb(i, 0, 0, LED_BRIGHTNESS)
     for vl53 in tof_sensors:
         if vl53 is not None:
             vl53.stop_ranging()
@@ -197,7 +210,7 @@ def read_tof_ack(data):
 def set_led(data):
     led, r, g, b = data
     if led < NUM_LEDS:
-        leds.set_rgb(led, r, g, b)
+        leds.set_rgb(led, (r * LED_BRIGHTNESS) // 255, (g * LED_BRIGHTNESS) // 255, (b * LED_BRIGHTNESS) // 255)
 
 def set_gripper(state):
     global gripper_timer
