@@ -67,7 +67,7 @@ COM_READ_BARREL_ACK = make_command('B', UBYTE)
 COM_POWER_TURRET_RECV = make_command('W', UBYTE)        # No Turret ACK
 COM_SET_TURRET_TILT_RECV = make_command('E', USHORT)    # No Tilt ACK
 COM_SET_TURRET_SPEED_RECV = make_command('S', USHORT)   # No Speed ACK
-COM_FIRE_TURRET_RECV = make_command('F', USHORT)        # No Fire ACK
+COM_FIRE_TURRET_RECV = make_command('F')                # No Fire ACK
 
 
 # Initialise the Inventor 2040 and systems
