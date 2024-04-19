@@ -191,13 +191,7 @@ def comms_disconnected():
     gripper_servo_l.disable()
     gripper_servo_r.disable()
 
-    turret_timer.deinit()
-    turret_timer_running = False
-    turret_tilt_servo.disable()
-    turret_fire_servo.disable()
-    turret_brushless.disable()
-    turret_motor.disable()
-    turret_laser.off()    
+    power_turret(0)
 
 # Command callback functions
 def identify_ack():
@@ -265,6 +259,7 @@ def read_gripper_ack():
 
 def power_turret(state):
     global turret_powered
+    global turret_timer_running
     if state == 1:
         turret_tilt_servo.to_min()
         turret_fire_servo.to_min()
