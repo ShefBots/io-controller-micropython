@@ -1,7 +1,7 @@
 import time
 import micropython
 from inventor import Inventor2040W, GP0, GP1, GP2, A0, A1, A2
-from comms.serial import make_command, USBSerialComms, UBYTE, USHORT
+from comms.serial import make_command, USBSerialComms, SSHORT, UBYTE, USHORT
 from sensors.vl53l4cd import VL53L4CD
 from machine import Timer, Pin
 from plasma import WS2812
@@ -53,7 +53,7 @@ COM_IDENTIFY_ACK = make_command('I', UBYTE)
 COM_POKE_RECV = make_command('P')   # No Poke ACK
 
 COM_READ_TOF_RECV = make_command('T', UBYTE)
-COM_READ_TOF_ACK = make_command('T', USHORT)
+COM_READ_TOF_ACK = make_command('T', SSHORT)
 
 COM_SET_LED_RECV = make_command('L', UBYTE * 4)     # No Set LED ACK
 
